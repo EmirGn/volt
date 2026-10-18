@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { useFeedback } from '../components/feedback';
 import { Button, Stepper } from '../components/ui';
 import { logWeight, weightSummary } from '../db/queries';
 import { fmtKg } from '../lib/format';
 import { color, size, space, type } from '../theme';
 
 export default function Weight() {
+  const { toast } = useFeedback();
   const [kg, setKg] = useState(() => weightSummary()?.latest ?? 68);
   const step = (d: number) => setKg((k) => Math.round((k + d) * 10) / 10);
   return (
@@ -27,6 +29,7 @@ export default function Weight() {
         onPress={() => {
           logWeight(kg);
           router.back();
+          toast({ title: 'Weight logged', detail: `${fmtKg(kg)} kg this morning` });
         }}
       />
     </View>

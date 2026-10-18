@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ErrorBoundaryProps, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import { ErrorScreen } from '../components/ErrorScreen';
+import { ConfirmSheet, DoneSheet, useFeedback } from '../components/feedback';
 import { Icon } from '../components/Icon';
 import { Button, Card, RoundButton, Stepper, Tick } from '../components/ui';
 import { useData } from '../db/useData';
 import {
+  bestKg,
   deleteSet,
   finishWorkout,
   getPlanItems,
@@ -17,17 +20,26 @@ import {
   PlanItem,
   progression,
   workoutSets,
+  workoutSummary,
 } from '../db/queries';
-import { fmtClock, fmtKg } from '../lib/format';
+import { fmtClock, fmtKg, fmtTonnes } from '../lib/format';
+import { cancelRestEnd, scheduleRestEnd, setWorkoutOpen } from '../lib/notifications';
 import { color, font, radius, size, space, type } from '../theme';
 
 type Entry = { exerciseId: number; kg: number; reps: number };
 type Rest = { endsAt: number; total: number };
 
+export function ErrorBoundary(props: ErrorBoundaryProps) {
+  return <ErrorScreen {...props} label="Workout" />;
+}
+
+const names = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
 export default function WorkoutScreen() {
   const { id: idParam } = useLocalSearchParams<{ id: string }>();
   const workoutId = Number(idParam);
   const insets = useSafeAreaInsets();
+  const { toast, sheet, replaceSheet } = useFeedback();
   const workout = useData(() => getWorkout(workoutId), [workoutId]);
   const items = useData(() => (workout?.routineId ? getPlanItems(workout.routineId) : []), [workout?.routineId]);
   const sets = useData(() => workoutSets(workoutId), [workoutId]);
@@ -49,14 +61,25 @@ export default function WorkoutScreen() {
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    setWorkoutOpen(true);
+    return () => {
+      clearInterval(t);
+      setWorkoutOpen(false);
+    };
   }, []);
 
   useEffect(() => {
     if (rest && now >= rest.endsAt) {
       setRest(null);
+      cancelRestEnd();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (item) {
+        const n = sets.filter((s) => s.exerciseId === item.exerciseId).length;
+        toast({ kind: 'info', title: 'Rest done', detail: n < item.sets ? `Next: ${item.name.toLowerCase()}, set ${n + 1}` : `Next: ${item.name.toLowerCase()}` });
+      }
     }
+    // Only the clock and the rest decide when this fires.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now, rest]);
 
   const last = useMemo(() => (item ? lastPerformance(item.exerciseId, workoutId) : []), [item, workoutId]);
@@ -110,8 +133,21 @@ export default function WorkoutScreen() {
       setEntry(null);
       return;
     }
-    logSet(workout.id, item.exerciseId, value.kg, value.reps);
+    const before = bestKg(item.exerciseId);
+    const setId = logSet(workout.id, item.exerciseId, value.kg, value.reps);
     const doneAfter = mine.length + 1;
+    toast({
+      title: `Set ${setNo} logged`,
+      detail: `${fmtKg(value.kg)} kg × ${value.reps}${before != null && value.kg > before ? ' · new best' : ''}`,
+      action: {
+        label: 'Undo',
+        onPress: () => {
+          deleteSet(setId);
+          setRest(null);
+          cancelRestEnd();
+        },
+      },
+    });
     // Supersets: hop to the partner without resting, rest after the pair.
     if (partner) {
       const pIdx = items.indexOf(partner);
@@ -119,6 +155,7 @@ export default function WorkoutScreen() {
       if (pDone < partner.sets && pDone < doneAfter) {
         setIdx(pIdx);
         setRest(null);
+        cancelRestEnd();
         return;
       }
       if (doneAfter < item.sets || pDone < partner.sets) {
@@ -127,25 +164,68 @@ export default function WorkoutScreen() {
       }
     }
     setRest({ endsAt: Date.now() + item.restSec * 1000, total: item.restSec });
+    const nextUp =
+      doneAfter < item.sets
+        ? `Set ${doneAfter + 1} of ${item.name.toLowerCase()} · ${fmtKg(value.kg)} kg × ${value.reps}`
+        : upNext
+          ? `Next: ${upNext.name.toLowerCase()}`
+          : 'That was the last set. Finish when you are ready.';
+    scheduleRestEnd(item.restSec, nextUp).catch(() => {});
   };
 
   const finish = () => {
-    const doIt = () => {
+    const summary = workoutSummary(workout.id);
+    if (!summary || summary.sets === 0) {
       finishWorkout(workout.id);
+      cancelRestEnd();
       router.back();
+      toast({ kind: 'info', title: 'Workout discarded', detail: 'No sets were logged' });
+      return;
+    }
+    const saved = () => {
+      finishWorkout(workout.id);
+      cancelRestEnd();
+      const s = workoutSummary(workout.id) ?? summary;
+      const best = s.best ? ` New best on ${s.best.name.toLowerCase()}: ${fmtKg(s.best.kg)} kg × ${s.best.reps}.` : '';
+      return (close: () => void) => (
+        <DoneSheet
+          title="Workout saved"
+          body={`${Math.max(1, Math.round(s.ms / 60000))} min · ${s.sets} sets · ${fmtTonnes(s.volume)} lifted.${best}`}
+          actionLabel="Back to Today"
+          close={close}
+        />
+      );
     };
-    if (allDone || sets.length === 0) return doIt();
-    Alert.alert('Finish workout?', `${sets.length} sets logged. Unfinished exercises are skipped.`, [
-      { text: 'Keep going', style: 'cancel' },
-      { text: 'Finish', onPress: doIt },
-    ]);
+    if (allDone) return sheet(saved(), { onClose: () => router.back() });
+
+    const body = summary.planned
+      ? `You've done ${summary.completed} of ${summary.planned} exercises.` +
+        (summary.skipped.length
+          ? ` ${names(summary.skipped)} will be saved as skipped.`
+          : ' Unfinished sets are skipped.')
+      : `${summary.sets} sets logged.`;
+    sheet((close) => (
+      <ConfirmSheet
+        icon="flag"
+        title="Finish workout?"
+        body={body}
+        stats={[
+          { value: fmtClock(summary.ms), label: 'time' },
+          { value: String(summary.sets), label: 'sets' },
+          { value: fmtTonnes(summary.volume), label: 'lifted' },
+        ]}
+        confirmLabel="Finish workout"
+        cancelLabel="Keep going"
+        onConfirm={() => replaceSheet(saved(), { onClose: () => router.back() })}
+        close={close}
+      />
+    ));
   };
 
-  const removeSet = (setId: number, n: number) =>
-    Alert.alert(`Delete set ${n}?`, undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteSet(setId) },
-    ]);
+  const removeSet = (setId: number, n: number) => {
+    const undo = deleteSet(setId);
+    toast({ title: `Set ${n} deleted`, action: { label: 'Undo', onPress: undo } });
+  };
 
   const hint = prog
     ? prog.ready
@@ -197,7 +277,10 @@ export default function WorkoutScreen() {
           </View>
           {rest && restLeft > 0 ? (
             <Pressable
-              onPress={() => setRest(null)}
+              onPress={() => {
+                setRest(null);
+                cancelRestEnd();
+              }}
               accessibilityRole="button"
               accessibilityLabel={`Resting, ${fmtClock(restLeft)} left. Skip rest`}
               style={{ marginTop: 6, minHeight: 40, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: color.volt, justifyContent: 'center' }}

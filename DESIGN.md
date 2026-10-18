@@ -113,3 +113,16 @@ The app will be native (Expo / React Native, iPhone first, then Android). The we
 - Load Bricolage Grotesque and Geist with `expo-font` / `@expo-google-fonts`. React Native has no `em`, so tracking becomes `letterSpacing` in points: hero −5.8, title −0.8, label +0.9.
 - `radius-pill` becomes `borderRadius: 999`, and the dock floats with `position: 'absolute'` inside the safe area.
 - `focus-ring` maps to the platform's own focus handling. Keep every `aria-label` as an `accessibilityLabel`.
+
+## Feedback and the opening
+
+The app never uses the platform's alerts or toasts. Everything lives in `src/components/feedback.tsx` and goes through `useFeedback()`:
+
+- **Sheets** for decisions: a white 30px card that slides up over a 48% ink scrim, an icon in a paper circle, a Bricolage title, a muted line, then one ink pill and one paper pill ("Finish workout" / "Keep going"). A finished action can swap the same sheet to its success state (big volt tick, "Workout saved").
+- **Hold to delete** instead of red buttons: the pill fills with ink over one second while held and drains back if let go. Small things (a set, a food entry, a plan item) delete on long press without a sheet. Every delete shows an Undo toast.
+- **Toasts** are ink pills above the dock (or above a screen's bottom button): a 40px badge (volt tick = done, dark grey timer = info, paper "!" = error), a title, a muted detail and at most one volt text action such as Undo.
+- **Offline** is a quiet white banner under the header on Today and Coach, never a blocking screen.
+- **Errors** show the "Hm." screen (`ErrorScreen`, wired as expo-router's `ErrorBoundary`): what was saved, an expandable error log with Copy and Share, then Try again and Go to Today.
+- **Notifications** are asked for once on our own screen first, and only cover rest timers and a reminder 15 minutes before a planned workout.
+
+The opening (`Opening.tsx`) runs on every cold launch: the ink curtain with the "V." mark (identical to the native splash) lifts, the last six days fill in, today pops volt and the streak counts up. Tap to skip. A day counts when anything was logged.

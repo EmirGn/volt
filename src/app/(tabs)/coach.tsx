@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { OfflineBanner } from '../../components/feedback';
 import { Icon } from '../../components/Icon';
 import { Card, Header, Rows, Screen, Segmented, Tick } from '../../components/ui';
 import { useData } from '../../db/useData';
@@ -20,6 +21,7 @@ export default function Coach() {
     <View style={{ flex: 1 }}>
       <Screen bottom={tab === 'chat' ? 184 : space.dockClear}>
         <Header label="Coach" />
+        <OfflineBanner />
         <View style={{ alignItems: 'center', gap: 4, paddingVertical: 4 }}>
           <Text style={[type.title, { fontSize: 44, lineHeight: 48, letterSpacing: -1.8, textAlign: 'center' }]}>Upper / Lower</Text>
           <Text style={[type.lead, { fontFamily: font.sans, color: color.inkMuted }]}>

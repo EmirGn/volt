@@ -1,6 +1,7 @@
 import { Pressable, View } from 'react-native';
-import { router, Slot, usePathname } from 'expo-router';
+import { ErrorBoundaryProps, router, Slot, usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ErrorScreen } from '../../components/ErrorScreen';
 import { Icon, IconName } from '../../components/Icon';
 import { color, radius, size } from '../../theme';
 
@@ -11,6 +12,10 @@ const ITEMS: { href: '/' | '/train' | '/food' | '/coach' | '/progress'; icon: Ic
   { href: '/coach', icon: 'chat', label: 'Coach' },
   { href: '/progress', icon: 'chart', label: 'Progress' },
 ];
+
+export function ErrorBoundary(props: ErrorBoundaryProps) {
+  return <ErrorScreen {...props} label="Volt" />;
+}
 
 export default function TabsLayout() {
   const pathname = usePathname();
