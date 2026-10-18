@@ -2,23 +2,25 @@
   "expo": {
     "name": "Volt",
     "slug": "volt",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.emirgn.volt"
+      "bundleIdentifier": "com.emirgn.volt",
+      "buildNumber": "2"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#F2F2EE",
+        "backgroundColor": "#111111",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.emirgn.volt"
+      "package": "com.emirgn.volt",
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/favicon.png"
