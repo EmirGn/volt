@@ -153,8 +153,13 @@ export function Opening({ onDone }: { onDone: () => void }) {
             style={{
               fontFamily: font.display,
               fontSize: 168,
-              lineHeight: 150,
+              // A full line height so iOS doesn't crop the glyph tops; negative margins pull it tight again.
+              lineHeight: 196,
+              marginTop: -18,
+              marginBottom: -40,
               letterSpacing: -10,
+              // Negative tracking shrinks the text box on iOS and clips the last digit.
+              paddingHorizontal: 12,
               color: color.ink,
               transform: [{ scale: num }],
             }}

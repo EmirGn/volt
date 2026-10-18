@@ -190,7 +190,7 @@ export default function WorkoutScreen() {
       return (close: () => void) => (
         <DoneSheet
           title="Workout saved"
-          body={`${Math.max(1, Math.round(s.ms / 60000))} min · ${s.sets} sets · ${fmtTonnes(s.volume)} lifted.${best}`}
+          body={`${Math.max(1, Math.round(s.ms / 60000))} min · ${s.sets} ${s.sets === 1 ? 'set' : 'sets'} · ${fmtTonnes(s.volume)} lifted.${best}`}
           actionLabel="Back to Today"
           close={close}
         />
@@ -200,9 +200,11 @@ export default function WorkoutScreen() {
 
     const body = summary.planned
       ? `You've done ${summary.completed} of ${summary.planned} exercises.` +
-        (summary.skipped.length
-          ? ` ${names(summary.skipped)} will be saved as skipped.`
-          : ' Unfinished sets are skipped.')
+        (summary.skipped.length > 2
+          ? ` The other ${summary.skipped.length} will be saved as skipped.`
+          : summary.skipped.length
+            ? ` ${names(summary.skipped)} will be saved as skipped.`
+            : ' Unfinished sets are skipped.')
       : `${summary.sets} sets logged.`;
     sheet((close) => (
       <ConfirmSheet
@@ -211,7 +213,7 @@ export default function WorkoutScreen() {
         body={body}
         stats={[
           { value: fmtClock(summary.ms), label: 'time' },
-          { value: String(summary.sets), label: 'sets' },
+          { value: String(summary.sets), label: summary.sets === 1 ? 'set' : 'sets' },
           { value: fmtTonnes(summary.volume), label: 'lifted' },
         ]}
         confirmLabel="Finish workout"

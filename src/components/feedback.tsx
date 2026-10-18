@@ -398,7 +398,7 @@ function ToastHost({ toast, onHide }: { toast: ToastState | null; onHide: (id: n
     setShown(toast);
     anim.setValue(0);
     Animated.timing(anim, { toValue: 1, duration: 420, easing: sheetEase, useNativeDriver: true }).start();
-    const t = setTimeout(() => onHide(toast.id), toast.action ? 4500 : 2600);
+    const t = setTimeout(() => onHide(toast.id), toast.action ? 6000 : 2600);
     return () => clearTimeout(t);
   }, [toast, anim, onHide]);
 

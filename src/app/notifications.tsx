@@ -139,7 +139,9 @@ function Notice({ style, time, title, body }: { style: StyleProp<ViewStyle>; tim
           <Text style={[type.caption, { fontSize: 12 }]}>{time}</Text>
         </View>
         <Text style={[type.body, { fontFamily: font.sansSemi }]}>{title}</Text>
-        <Text style={[type.body, { fontFamily: font.sans, fontSize: 14, color: color.inkMuted }]}>{body}</Text>
+        <Text numberOfLines={1} style={[type.body, { fontFamily: font.sans, fontSize: 14, color: color.inkMuted }]}>
+          {body}
+        </Text>
       </View>
     </View>
   );
