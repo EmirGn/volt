@@ -20,6 +20,10 @@ const PATHS = {
   send: 'M12 19V5M5 12l7-7 7 7',
   close: 'M6 6l12 12M18 6L6 18',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  retry: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
+  flag: 'M5 21V4M5 4h11l-2 4 2 4H5',
+  timer: 'M20 13a8 8 0 1 1-16 0 8 8 0 0 1 16 0zM12 9v4l2.5 2M9 2h6',
+  alert: 'M12 6v8M12 18h.01',
 } as const;
 
 export type IconName = keyof typeof PATHS;

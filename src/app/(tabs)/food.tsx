@@ -1,19 +1,18 @@
 import { useState } from 'react';
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
+import { useFoodToasts, useTickHabit } from '../../components/actions';
 import { Icon } from '../../components/Icon';
 import { Card, CheckRow, EmptyNote, Header, HeroNumber, Row, Rows, Screen, Segmented, SmallButton } from '../../components/ui';
 import { useData } from '../../db/useData';
 import {
   addPreset,
-  deleteFood,
   foodForDay,
   getTargets,
   habitsForDay,
   mealForNow,
   MEALS,
   presets,
-  toggleHabit,
   totalsFor,
 } from '../../db/queries';
 import { fmtInt } from '../../lib/format';
@@ -81,6 +80,7 @@ export default function Food() {
 
 function MealsCard() {
   const food = useData(() => foodForDay());
+  const foodToasts = useFoodToasts();
   const firstEmpty = MEALS.find((m) => !food.some((f) => f.meal === m.id))?.id;
   return (
     <Card rows>
@@ -114,12 +114,7 @@ function MealsCard() {
               {entries.map((e) => (
                 <Pressable
                   key={e.id}
-                  onLongPress={() =>
-                    Alert.alert(`Remove ${e.name}?`, undefined, [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Remove', style: 'destructive', onPress: () => deleteFood(e.id) },
-                    ])
-                  }
+                  onLongPress={() => foodToasts.removed(e.id, e.name)}
                   accessibilityHint="Long press to remove"
                 >
                   <Text style={type.caption}>
@@ -138,11 +133,12 @@ function MealsCard() {
 function SuppsCard() {
   const supps = useData(() => habitsForDay(undefined, 'supplement'));
   const taken = supps.filter((s) => s.done).length;
+  const tick = useTickHabit();
   return (
     <Card rows>
       <Rows>
         {supps.map((s) => (
-          <CheckRow key={s.id} label={s.title} meta={s.streak > 1 ? `${s.dose} · ${s.streak} days` : s.dose} done={s.done} onToggle={() => toggleHabit(s.id)} />
+          <CheckRow key={s.id} label={s.title} meta={s.streak > 1 ? `${s.dose} · ${s.streak} days` : s.dose} done={s.done} onToggle={() => tick(s, supps)} />
         ))}
       </Rows>
       <Text style={[type.caption, { paddingVertical: 14 }]}>
@@ -154,6 +150,7 @@ function SuppsCard() {
 
 function RecentCard({ search }: { search: string }) {
   const list = useData(() => presets(search), [search]);
+  const food = useFoodToasts();
   if (!list.length) {
     return (
       <Card rows>
@@ -173,7 +170,8 @@ function RecentCard({ search }: { search: string }) {
             right={
               <Pressable
                 onPress={() => {
-                  addPreset(p, mealForNow());
+                  const meal = mealForNow();
+                  food.added(addPreset(p, meal), meal, p.kcal);
                 }}
                 accessibilityRole="button"
                 accessibilityLabel={`Add ${p.name}`}

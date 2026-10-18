@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { useTickHabit } from '../../components/actions';
+import { OfflineBanner } from '../../components/feedback';
 import {
   Button,
   Card,
@@ -26,7 +28,6 @@ import {
   nextRoutine,
   startWorkout,
   todaysRoutine,
-  toggleHabit,
   totalsFor,
   weekWorkouts,
 } from '../../db/queries';
@@ -45,6 +46,7 @@ export default function Today() {
   return (
     <Screen>
         <Header label={fmtDate()} icon="user" accessibilityLabel="Progress and profile" onPress={() => router.replace('/progress')} />
+        <OfflineBanner />
         <HeroNumber
           value={fmtInt(Math.abs(left))}
           caption={`${left >= 0 ? 'kcal left' : 'kcal over'} · ${fmtInt(totals.kcal)} of ${fmtInt(targets.kcal)} eaten`}
@@ -162,6 +164,7 @@ function FoodCard() {
 
 function TasksCard() {
   const habits = useData(() => habitsForDay());
+  const tick = useTickHabit();
   return (
     <Card rows>
       <Rows>
@@ -171,7 +174,7 @@ function TasksCard() {
             label={h.dose ? `${h.title} ${h.dose}` : h.title}
             meta={h.streak > 1 ? `${h.streak} day streak` : undefined}
             done={h.done}
-            onToggle={() => toggleHabit(h.id)}
+            onToggle={() => tick(h, habits)}
           />
         ))}
       </Rows>

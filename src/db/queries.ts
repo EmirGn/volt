@@ -1,3 +1,4 @@
+import type { SQLiteBindValue } from 'expo-sqlite';
 import { db, notify } from './db';
 
 // ---------- dates ----------
@@ -43,6 +44,46 @@ export function planWeek(): number {
   const start = new Date(getTargets().planStart + 'T00:00:00');
   const diff = startOfWeek().getTime() - startOfWeek(start).getTime();
   return Math.max(1, Math.round(diff / (7 * 86400000)) + 1);
+}
+
+export function getSetting(key: string): string | null {
+  return db.getFirstSync<{ value: string }>('SELECT value FROM settings WHERE key = ?', key)?.value ?? null;
+}
+
+export function setSetting(key: string, value: string) {
+  db.runSync('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
+}
+
+/** When planned workouts usually start, "HH:MM". Reminders go out 15 minutes before. */
+export function workoutTime(): string {
+  return getSetting('workout_time') ?? '17:00';
+}
+
+// ---------- undo ----------
+
+type Row = Record<string, SQLiteBindValue>;
+export type Undo = () => void;
+
+function take(table: string, where: string, ...args: SQLiteBindValue[]): Row[] {
+  return db.getAllSync<Row>(`SELECT * FROM ${table} WHERE ${where}`, ...args);
+}
+
+function put(table: string, rows: Row[]) {
+  for (const r of rows) {
+    const cols = Object.keys(r);
+    db.runSync(
+      `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`,
+      ...cols.map((c) => r[c]),
+    );
+  }
+}
+
+/** Puts deleted rows back exactly as they were, ids included. */
+function restorer(table: string, rows: Row[]): Undo {
+  return () => {
+    put(table, rows);
+    notify();
+  };
 }
 
 // ---------- routines ----------
@@ -152,14 +193,14 @@ export function workoutSets(workoutId: number): LoggedSet[] {
   );
 }
 
-export function logSet(workoutId: number, exerciseId: number, kg: number, reps: number) {
+export function logSet(workoutId: number, exerciseId: number, kg: number, reps: number): number {
   const n =
     db.getFirstSync<{ n: number }>(
       'SELECT COUNT(*) AS n FROM sets WHERE workout_id = ? AND exercise_id = ?',
       workoutId,
       exerciseId,
     )?.n ?? 0;
-  db.runSync(
+  const r = db.runSync(
     'INSERT INTO sets (workout_id, exercise_id, set_index, kg, reps, done_at) VALUES (?, ?, ?, ?, ?, ?)',
     workoutId,
     exerciseId,
@@ -169,11 +210,116 @@ export function logSet(workoutId: number, exerciseId: number, kg: number, reps: 
     Date.now(),
   );
   notify();
+  return r.lastInsertRowId;
 }
 
-export function deleteSet(id: number) {
+export function deleteSet(id: number): Undo {
+  const rows = take('sets', 'id = ?', id);
   db.runSync('DELETE FROM sets WHERE id = ?', id);
   notify();
+  return restorer('sets', rows);
+}
+
+/** Heaviest weight ever logged for an exercise, finished workouts and the current one alike. */
+export function bestKg(exerciseId: number): number | null {
+  return db.getFirstSync<{ kg: number | null }>('SELECT MAX(kg) AS kg FROM sets WHERE exercise_id = ?', exerciseId)?.kg ?? null;
+}
+
+export type WorkoutSummary = {
+  ms: number;
+  sets: number;
+  volume: number;
+  planned: number;
+  completed: number;
+  skipped: string[];
+  best: { name: string; kg: number; reps: number } | null;
+};
+
+export function workoutSummary(id: number): WorkoutSummary | null {
+  const w = getWorkout(id);
+  if (!w) return null;
+  const sets = workoutSets(id);
+  const plan = w.routineId ? getPlanItems(w.routineId) : [];
+  const count = (exId: number) => sets.filter((s) => s.exerciseId === exId).length;
+  // The first new best in plan order is the one worth mentioning.
+  let best: WorkoutSummary['best'] = null;
+  const exerciseIds = [...new Set([...plan.map((p) => p.exerciseId), ...sets.map((s) => s.exerciseId)])];
+  for (const exId of exerciseIds) {
+    const mine = sets.filter((s) => s.exerciseId === exId);
+    if (!mine.length) continue;
+    const top = mine.reduce((a, b) => (b.kg > a.kg || (b.kg === a.kg && b.reps > a.reps) ? b : a));
+    const before = db.getFirstSync<{ kg: number | null }>(
+      `SELECT MAX(s.kg) AS kg FROM sets s JOIN workouts x ON x.id = s.workout_id
+       WHERE s.exercise_id = ? AND x.id != ? AND x.finished_at IS NOT NULL`,
+      exId,
+      id,
+    )?.kg;
+    if (before != null && top.kg > before) {
+      const name = db.getFirstSync<{ name: string }>('SELECT name FROM exercises WHERE id = ?', exId)?.name ?? '';
+      best = { name, kg: top.kg, reps: top.reps };
+      break;
+    }
+  }
+  return {
+    ms: (w.finishedAt ?? Date.now()) - w.startedAt,
+    sets: sets.length,
+    volume: sets.reduce((v, s) => v + s.kg * s.reps, 0),
+    planned: plan.length,
+    completed: plan.filter((p) => count(p.exerciseId) >= p.sets).length,
+    skipped: plan.filter((p) => count(p.exerciseId) === 0).map((p) => p.name),
+    best,
+  };
+}
+
+/** The last set logged in a workout, for the error screen's "nothing was lost" card. */
+export function lastLoggedSet(workoutId: number) {
+  return db.getFirstSync<{ name: string; kg: number; reps: number; exercises: number }>(
+    `SELECT e.name, s.kg, s.reps,
+            (SELECT COUNT(DISTINCT exercise_id) FROM sets WHERE workout_id = s.workout_id) AS exercises
+     FROM sets s JOIN exercises e ON e.id = s.exercise_id
+     WHERE s.workout_id = ? ORDER BY s.done_at DESC LIMIT 1`,
+    workoutId,
+  );
+}
+
+// ---------- streak ----------
+
+const LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+/**
+ * A day counts when anything was logged: a finished workout, food, or a ticked supplement or task.
+ * `before` is the run up to yesterday, so the opening can count it up to include today.
+ */
+export function activityStreak() {
+  const since = new Date();
+  since.setDate(since.getDate() - 400);
+  const from = dayKey(since);
+  const active = new Set(
+    db
+      .getAllSync<{ day: string }>('SELECT day FROM food_entries WHERE day >= ? UNION SELECT day FROM habit_logs WHERE day >= ?', from, from)
+      .map((r) => r.day),
+  );
+  for (const w of db.getAllSync<{ t: number }>(
+    'SELECT started_at AS t FROM workouts WHERE finished_at IS NOT NULL AND started_at >= ?',
+    since.getTime(),
+  )) {
+    active.add(dayKey(new Date(w.t)));
+  }
+  const today = new Date();
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  let before = 0;
+  while (active.has(dayKey(d))) {
+    before++;
+    d.setDate(d.getDate() - 1);
+  }
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const x = new Date(today);
+    x.setDate(x.getDate() - (6 - i));
+    return { label: LETTERS[x.getDay()], active: active.has(dayKey(x)), today: i === 6 };
+  });
+  const todayActive = active.has(dayKey(today));
+  return { before, today: todayActive, streak: before + (todayActive ? 1 : 0), days };
 }
 
 /** Sets from the most recent finished workout that included this exercise. */
@@ -339,8 +485,8 @@ export function totalsFor(entries: FoodEntry[]) {
   );
 }
 
-export function addFood(f: Omit<FoodEntry, 'id'>, day = dayKey()) {
-  db.runSync(
+export function addFood(f: Omit<FoodEntry, 'id'>, day = dayKey()): number {
+  const r = db.runSync(
     'INSERT INTO food_entries (day, meal, name, kcal, protein, carbs, fat, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     day,
     f.meal,
@@ -352,11 +498,14 @@ export function addFood(f: Omit<FoodEntry, 'id'>, day = dayKey()) {
     Date.now(),
   );
   notify();
+  return r.lastInsertRowId;
 }
 
-export function deleteFood(id: number) {
+export function deleteFood(id: number): Undo {
+  const rows = take('food_entries', 'id = ?', id);
   db.runSync('DELETE FROM food_entries WHERE id = ?', id);
   notify();
+  return restorer('food_entries', rows);
 }
 
 export type Preset = { id: number; name: string; detail: string; kcal: number; protein: number; carbs: number; fat: number };
@@ -369,10 +518,11 @@ export function presets(search = ''): Preset[] {
   );
 }
 
-export function addPreset(p: Preset, meal: Meal) {
-  addFood({ meal, name: p.name, kcal: p.kcal, protein: p.protein, carbs: p.carbs, fat: p.fat });
+export function addPreset(p: Preset, meal: Meal): number {
+  const id = addFood({ meal, name: p.name, kcal: p.kcal, protein: p.protein, carbs: p.carbs, fat: p.fat });
   db.runSync('UPDATE food_presets SET last_used = ? WHERE id = ?', Date.now(), p.id);
   notify();
+  return id;
 }
 
 export function savePreset(p: Omit<Preset, 'id'>) {
@@ -475,12 +625,27 @@ export function setRoutineDay(id: number, weekday: number | null) {
   notify();
 }
 
-export function deleteRoutine(id: number) {
+export function deleteRoutine(id: number): Undo {
+  const routine = take('routines', 'id = ?', id);
+  const items = take('routine_exercises', 'routine_id = ?', id);
+  const linked = db.getAllSync<{ id: number }>('SELECT id FROM workouts WHERE routine_id = ?', id);
   db.withTransactionSync(() => {
     db.runSync('UPDATE workouts SET routine_id = NULL WHERE routine_id = ?', id);
     db.runSync('DELETE FROM routines WHERE id = ?', id);
   });
   notify();
+  return () => {
+    db.withTransactionSync(() => {
+      // Keep one routine per weekday: if the day was taken meanwhile, come back unscheduled.
+      const r = routine.map((row) =>
+        row.weekday != null && db.getFirstSync('SELECT 1 FROM routines WHERE weekday = ?', row.weekday) ? { ...row, weekday: null } : row,
+      );
+      put('routines', r);
+      put('routine_exercises', items);
+      for (const w of linked) db.runSync('UPDATE workouts SET routine_id = ? WHERE id = ?', id, w.id);
+    });
+    notify();
+  };
 }
 
 export type Exercise = { id: number; name: string };
@@ -526,9 +691,11 @@ export function updatePlanItem(id: number, patch: { sets?: number; repMin?: numb
   notify();
 }
 
-export function removePlanItem(id: number) {
+export function removePlanItem(id: number): Undo {
+  const rows = take('routine_exercises', 'id = ?', id);
   db.runSync('DELETE FROM routine_exercises WHERE id = ?', id);
   notify();
+  return restorer('routine_exercises', rows);
 }
 
 export function movePlanItem(routineId: number, id: number, dir: -1 | 1) {

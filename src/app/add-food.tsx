@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useFoodToasts } from '../components/actions';
 import { Icon } from '../components/Icon';
 import { Button, Card, RoundButton, Row, Rows, Segmented } from '../components/ui';
 import { useData } from '../db/useData';
@@ -12,6 +13,7 @@ export default function AddFood() {
   const params = useLocalSearchParams<{ meal?: Meal }>();
   const [meal, setMeal] = useState<Meal>(params.meal ?? mealForNow());
   const list = useData(() => presets());
+  const food = useFoodToasts();
   const [name, setName] = useState('');
   const [kcal, setKcal] = useState('');
   const [protein, setProtein] = useState('');
@@ -26,9 +28,10 @@ export default function AddFood() {
   const add = () => {
     if (!canAdd) return;
     const f = { name: name.trim(), kcal: kcalNum, protein: num(protein), carbs: num(carbs), fat: num(fat) };
-    addFood({ meal, ...f });
+    const id = addFood({ meal, ...f });
     if (save) savePreset({ ...f, detail: '' });
     router.back();
+    food.added(id, meal, f.kcal);
   };
 
   return (
@@ -50,8 +53,9 @@ export default function AddFood() {
                 subtitle={`${fmtInt(p.kcal)} kcal · P ${Math.round(p.protein)} · C ${Math.round(p.carbs)} · F ${Math.round(p.fat)}`}
                 minHeight={60}
                 onPress={() => {
-                  addPreset(p, meal);
+                  const id = addPreset(p, meal);
                   router.back();
+                  food.added(id, meal, p.kcal);
                 }}
                 right={<Icon name="plus" size={18} strokeWidth={2.4} />}
               />

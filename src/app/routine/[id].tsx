@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { HoldToDeleteSheet, useFeedback } from '../../components/feedback';
 import { Icon, IconName } from '../../components/Icon';
 import { Button, Card, RoundButton } from '../../components/ui';
 import { useData } from '../../db/useData';
@@ -20,6 +21,7 @@ import {
   updatePlanItem,
   WEEKDAY_SHORT,
 } from '../../db/queries';
+import { resyncReminders } from '../../lib/notifications';
 import { color, font, radius, size, space, type } from '../../theme';
 
 export default function RoutineEditor() {
@@ -30,6 +32,7 @@ export default function RoutineEditor() {
   const items = useData(() => getPlanItems(id), [id]);
   const [name, setName] = useState(routine?.name ?? '');
   const [open, setOpen] = useState<number | null>(null);
+  const { sheet, toast } = useFeedback();
 
   useEffect(() => {
     if (routine) setName(routine.name);
@@ -46,18 +49,33 @@ export default function RoutineEditor() {
     );
   }
 
-  const remove = () =>
-    Alert.alert(`Delete ${routine.name}?`, 'Past workouts stay in your history.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
+  const remove = () => {
+    const name = routine.name;
+    const n = items.length;
+    sheet((close) => (
+      <HoldToDeleteSheet
+        title={`Delete ${name}?`}
+        body={`This removes the routine${n ? ` and its ${n} ${n === 1 ? 'exercise' : 'exercises'}` : ''}. Workouts you've already done stay in History.`}
+        onDelete={() => {
+          close();
           router.back();
-          deleteRoutine(id);
-        },
-      },
-    ]);
+          const undo = deleteRoutine(id);
+          resyncReminders();
+          toast({
+            title: `${name} deleted`,
+            action: {
+              label: 'Undo',
+              onPress: () => {
+                undo();
+                resyncReminders();
+              },
+            },
+          });
+        }}
+        close={close}
+      />
+    ));
+  };
 
   const start = () => {
     const active = activeWorkout();
@@ -99,7 +117,10 @@ export default function RoutineEditor() {
               return (
                 <Pressable
                   key={d}
-                  onPress={() => setRoutineDay(id, on ? null : wd)}
+                  onPress={() => {
+                    setRoutineDay(id, on ? null : wd);
+                    resyncReminders();
+                  }}
                   accessibilityRole="button"
                   accessibilityState={{ selected: on }}
                   accessibilityLabel={`${d}${on ? ', selected' : ''}`}
@@ -170,6 +191,7 @@ function ItemRow({
   onToggle: () => void;
   routineId: number;
 }) {
+  const { toast } = useFeedback();
   const rest = item.restSec >= 60 ? `${Math.floor(item.restSec / 60)}:${String(item.restSec % 60).padStart(2, '0')}` : `${item.restSec}s`;
   return (
     <View style={{ borderTopWidth: first ? 0 : 1, borderTopColor: color.line }}>
@@ -211,7 +233,14 @@ function ItemRow({
               disabled={item.superset == null && last}
               onPress={() => toggleSuperset(routineId, item.id)}
             />
-            <Action icon="trash" label="Remove" onPress={() => removePlanItem(item.id)} />
+            <Action
+              icon="trash"
+              label="Remove"
+              onPress={() => {
+                const undo = removePlanItem(item.id);
+                toast({ title: `${item.name} removed`, action: { label: 'Undo', onPress: undo } });
+              }}
+            />
           </View>
         </View>
       ) : null}
