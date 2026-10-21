@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import Svg, { Circle, Line, Polyline, Text as SvgText } from 'react-native-svg';
-import { Badge, Button, Card, Chip, EmptyNote, Header, HeroNumber, Row, Rows, Screen, Segmented } from '../../components/ui';
+import Svg, { Line, Text as SvgText } from 'react-native-svg';
+import { Dots, DrawLine, EndDot } from '../../components/Chart';
+import { Icon } from '../../components/Icon';
+import { Badge, Button, Card, Chip, EmptyNote, Header, HeroNumber, Row, Rows, Screen, Segmented, SwipeSegments, useRememberedSegment } from '../../components/ui';
 import { useData } from '../../db/useData';
 import { exerciseBests, habitsForDay, mainLiftTrend, weightSummary, workoutStats } from '../../db/queries';
 import { fmtKg, fmtTonnes } from '../../lib/format';
@@ -11,7 +12,7 @@ import { color, font, type } from '../../theme';
 type Range = 'week' | 'month' | 'year';
 
 export default function Progress() {
-  const [range, setRange] = useState<Range>('month');
+  const [range, setRange] = useRememberedSegment<Range>('progress', () => 'month');
   const stats = useData(() => workoutStats(range), [range]);
   const weight = useData(weightSummary);
   const creatine = useData(() => habitsForDay(undefined, 'supplement').find((h) => h.title === 'Creatine'));
@@ -33,9 +34,13 @@ export default function Progress() {
         value={range}
         onChange={setRange}
       />
-      <TrendCard />
-      <WeightCard />
-      <RecordsCard />
+      <SwipeSegments ids={['week', 'month', 'year'] as Range[]} value={range} onChange={setRange}>
+        <View style={{ gap: 18 }}>
+          <TrendCard />
+          <WeightCard />
+          <RecordsCard />
+        </View>
+      </SwipeSegments>
     </Screen>
   );
 }
@@ -66,26 +71,24 @@ function TrendCard() {
   return (
     <Card style={{ gap: 10 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <Text style={type.lead}>{trend.name}</Text>
+        <Pressable
+          onPress={() => router.push({ pathname: '/exercise/[id]', params: { id: String(trend.exerciseId) } })}
+          accessibilityRole="button"
+          accessibilityLabel={`${trend.name}. Show all sessions`}
+          hitSlop={10}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+        >
+          <Text style={type.lead}>{trend.name}</Text>
+          <Icon name="chevron" size={14} color={color.inkMuted} strokeWidth={2.2} />
+        </Pressable>
         <Text style={type.stat}>{fmtKg(vals[vals.length - 1])} kg</Text>
       </View>
       <Svg width="100%" height={140} viewBox="0 0 318 140" accessibilityLabel={`${trend.name} best set per week: ${vals.map(fmtKg).join(', ')} kg`}>
         <Line x1={0} y1={30} x2={318} y2={30} stroke={color.line} strokeWidth={1.5} />
         <Line x1={0} y1={110} x2={318} y2={110} stroke={color.line} strokeWidth={1.5} />
-        {pts.length > 1 ? (
-          <Polyline
-            points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
-            fill="none"
-            stroke={color.ink}
-            strokeWidth={4}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ) : null}
-        {pts.slice(0, -1).map((p, i) => (
-          <Circle key={i} cx={p.x} cy={p.y} r={5} fill={color.ink} />
-        ))}
-        {lastPt ? <Circle cx={lastPt.x} cy={lastPt.y} r={9} fill={color.volt} stroke={color.ink} strokeWidth={3} /> : null}
+        <DrawLine pts={pts} />
+        <Dots pts={pts.slice(0, -1)} />
+        {lastPt ? <EndDot at={lastPt} /> : null}
         {xs.map((x, i) => (
           <SvgText key={i} x={x} y={134} textAnchor="middle" fontSize={12} fontFamily={font.sansMedium} fill={color.inkMuted}>
             {i === xs.length - 1 ? 'Now' : `W-${xs.length - 1 - i}`}
@@ -131,6 +134,7 @@ function RecordsCard() {
             key={b.exerciseId}
             title={b.name}
             minHeight={54}
+            onPress={() => router.push({ pathname: '/exercise/[id]', params: { id: String(b.exerciseId) } })}
             right={
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 {b.isNew ? <Badge label="New" /> : null}

@@ -1,6 +1,7 @@
-import { Children, Fragment, isValidElement, ReactNode, useEffect, useRef } from 'react';
+import { Children, Fragment, isValidElement, ReactNode, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleProp,
@@ -55,6 +56,19 @@ export function Header({
   );
 }
 
+/** Header for pushed screens: back on the left, the page label centred. */
+export function BackHeader({ label, onBack }: { label: string; onBack: () => void }) {
+  return (
+    <View style={styles.header}>
+      <RoundButton icon="back" strokeWidth={2.4} accessibilityLabel="Back" onPress={onBack} />
+      <Text style={[type.pageLabel, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>
+        {label}
+      </Text>
+      <View style={{ width: size.touchMin }} />
+    </View>
+  );
+}
+
 export function RoundButton({
   icon,
   onPress,
@@ -87,11 +101,14 @@ export function HeroNumber({
   suffix,
   caption,
   children,
+  below,
 }: {
   value: string;
   suffix?: string;
   caption?: string;
   children?: ReactNode;
+  /** Full-width content under the chips, like the protein line. */
+  below?: ReactNode;
 }) {
   return (
     <View style={styles.hero} accessibilityRole="summary">
@@ -101,7 +118,35 @@ export function HeroNumber({
       </Text>
       {caption ? <Text style={[type.lead, { fontFamily: font.sans, color: color.inkMuted }]}>{caption}</Text> : null}
       {children ? <View style={styles.heroChips}>{children}</View> : null}
+      {below ? <View style={{ alignSelf: 'stretch', marginTop: 14 }}>{below}</View> : null}
     </View>
+  );
+}
+
+/** A thin progress line with its label: ink while short, volt once the target is hit. */
+export function ProgressLine({ value, target, label }: { value: number; target: number; label: string }) {
+  const pct = Math.max(0, Math.min(1, target ? value / target : 0));
+  const hit = target > 0 && value >= target;
+  return (
+    <View style={{ gap: 8, paddingHorizontal: 8 }} accessibilityLabel={label}>
+      <View style={{ height: 8, borderRadius: 8, backgroundColor: color.track, overflow: 'hidden' }}>
+        <View style={{ width: `${pct * 100}%`, height: 8, borderRadius: 8, backgroundColor: hit ? color.volt : color.ink }} />
+      </View>
+      <Text style={[type.caption, { textAlign: 'center', fontSize: 14 }]}>{label}</Text>
+    </View>
+  );
+}
+
+/** Content under a segmented switch fades and rises 6pt when it changes. Key it on the segment. */
+export function FadeIn({ children }: { children: ReactNode }) {
+  const t = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(t, { toValue: 1, duration: 160, useNativeDriver: true }).start();
+  }, [t]);
+  return (
+    <Animated.View style={{ opacity: t, transform: [{ translateY: t.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }] }}>
+      {children}
+    </Animated.View>
   );
 }
 
@@ -181,6 +226,56 @@ export function Segmented<T extends string>({
           </Pressable>
         );
       })}
+    </View>
+  );
+}
+
+/** Segment choices outlive the screen for as long as the app runs, so coming back to a tab keeps your place. */
+const remembered = new Map<string, string>();
+
+export function useRememberedSegment<T extends string>(key: string, initial: () => T): [T, (v: T) => void] {
+  const [value, setValue] = useState<T>(() => (remembered.get(key) as T | undefined) ?? initial());
+  return [
+    value,
+    (v: T) => {
+      remembered.set(key, v);
+      setValue(v);
+    },
+  ];
+}
+
+/**
+ * The card under a segmented switch. Swiping sideways on it moves to the next or previous segment,
+ * and the new content fades in. Vertical scrolling still wins unless the drag is clearly sideways.
+ */
+export function SwipeSegments<T extends string>({
+  ids,
+  value,
+  onChange,
+  children,
+}: {
+  ids: T[];
+  value: T;
+  onChange: (id: T) => void;
+  children: ReactNode;
+}) {
+  const latest = useRef({ ids, value, onChange });
+  latest.current = { ids, value, onChange };
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      onPanResponderTerminationRequest: () => true,
+      onPanResponderRelease: (_, g) => {
+        const { ids: list, value: v, onChange: change } = latest.current;
+        const i = list.indexOf(v);
+        if ((g.dx < -50 || g.vx < -0.5) && i < list.length - 1) change(list[i + 1]);
+        else if ((g.dx > 50 || g.vx > 0.5) && i > 0) change(list[i - 1]);
+      },
+    }),
+  ).current;
+  return (
+    <View {...pan.panHandlers}>
+      <FadeIn key={value}>{children}</FadeIn>
     </View>
   );
 }
@@ -361,6 +456,35 @@ export function CheckRow({
   );
 }
 
+/** A tap steps once; holding repeats, and speeds up after the first few steps. */
+function RepeatButton({ icon, label, onStep }: { icon: IconName; label: string; onStep: () => void }) {
+  const step = useRef(onStep);
+  step.current = onStep;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stop = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  const repeat = (n: number) => {
+    step.current();
+    timer.current = setTimeout(() => repeat(n + 1), n < 6 ? 140 : 60);
+  };
+  useEffect(() => stop, []);
+  return (
+    <Pressable
+      onPress={() => step.current()}
+      onLongPress={() => repeat(0)}
+      delayLongPress={320}
+      onPressOut={stop}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}
+    >
+      <Icon name={icon} size={20} strokeWidth={2.4} />
+    </Pressable>
+  );
+}
+
 export function Stepper({
   label,
   onMinus,
@@ -372,23 +496,9 @@ export function Stepper({
 }) {
   return (
     <View style={styles.stepper}>
-      <Pressable
-        onPress={onMinus}
-        accessibilityRole="button"
-        accessibilityLabel={`Decrease ${label.toLowerCase()}`}
-        style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}
-      >
-        <Icon name="minus" size={20} strokeWidth={2.4} />
-      </Pressable>
+      <RepeatButton icon="minus" label={`Decrease ${label.toLowerCase()}`} onStep={onMinus} />
       <Text style={[type.body, { fontFamily: font.sansSemi, fontSize: 14 }]}>{label}</Text>
-      <Pressable
-        onPress={onPlus}
-        accessibilityRole="button"
-        accessibilityLabel={`Increase ${label.toLowerCase()}`}
-        style={({ pressed }) => [styles.stepBtn, pressed && styles.pressed]}
-      >
-        <Icon name="plus" size={20} strokeWidth={2.4} />
-      </Pressable>
+      <RepeatButton icon="plus" label={`Increase ${label.toLowerCase()}`} onStep={onPlus} />
     </View>
   );
 }

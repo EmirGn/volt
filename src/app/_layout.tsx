@@ -12,7 +12,7 @@ import { ErrorScreen } from '../components/ErrorScreen';
 import { FeedbackProvider } from '../components/feedback';
 import { Opening } from '../components/Opening';
 import { migrate } from '../db/db';
-import { resyncReminders, shouldAskForNotifications } from '../lib/notifications';
+import { resyncHabitNudge, resyncReminders, shouldAskForNotifications } from '../lib/notifications';
 import { color } from '../theme';
 
 SplashScreen.preventAutoHideAsync();
@@ -47,6 +47,7 @@ export default function RootLayout() {
   const opened = () => {
     setOpening(false);
     resyncReminders();
+    resyncHabitNudge();
     shouldAskForNotifications().then((ask) => ask && router.push('/notifications'));
   };
 
@@ -61,6 +62,9 @@ export default function RootLayout() {
           <Stack.Screen name="workout" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
           <Stack.Screen name="add-food" options={{ presentation: 'modal' }} />
           <Stack.Screen name="routine/[id]" />
+          <Stack.Screen name="history/index" />
+          <Stack.Screen name="history/[id]" />
+          <Stack.Screen name="exercise/[id]" />
           <Stack.Screen name="pick-exercise" options={{ presentation: 'modal' }} />
           <Stack.Screen name="weight" options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5], sheetGrabberVisible: true }} />
           <Stack.Screen name="notifications" options={{ presentation: 'fullScreenModal' }} />

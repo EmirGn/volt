@@ -10,15 +10,19 @@ import {
   Header,
   HeroNumber,
   MacroChip,
+  ProgressLine,
   Row,
   Rows,
   Screen,
   Segmented,
   SmallButton,
+  SwipeSegments,
+  useRememberedSegment,
 } from '../../components/ui';
 import { useData } from '../../db/useData';
 import {
   activeWorkout,
+  eveningHint,
   foodForDay,
   getPlanItems,
   getTargets,
@@ -31,17 +35,25 @@ import {
   totalsFor,
   weekWorkouts,
 } from '../../db/queries';
-import { fmtDate, fmtInt, weekdayName } from '../../lib/format';
+import { fmtDate, fmtInt, proteinLabel, weekdayName } from '../../lib/format';
+import { habitNudgeOn, setHabitNudge } from '../../lib/notifications';
 import { color, type } from '../../theme';
 
 type Tab = 'workout' | 'food' | 'tasks';
 
+/** Workout until you've trained today or it's past 18:00, then Food. */
+function smartTab(): Tab {
+  const trained = weekWorkouts().some((w) => w.weekday === isoWeekday());
+  return trained || new Date().getHours() >= 18 ? 'food' : 'workout';
+}
+
 export default function Today() {
-  const [tab, setTab] = useState<Tab>('workout');
+  const [tab, setTab] = useRememberedSegment<Tab>('today', smartTab);
   const targets = useData(getTargets);
   const food = useData(() => foodForDay());
   const totals = totalsFor(food);
   const left = targets.kcal - totals.kcal;
+  const hint = eveningHint(totals.kcal, targets.kcal);
 
   return (
     <Screen>
@@ -49,7 +61,10 @@ export default function Today() {
         <OfflineBanner />
         <HeroNumber
           value={fmtInt(Math.abs(left))}
-          caption={`${left >= 0 ? 'kcal left' : 'kcal over'} · ${fmtInt(totals.kcal)} of ${fmtInt(targets.kcal)} eaten`}
+          caption={
+            hint ? `kcal left · ${hint}` : `${left >= 0 ? 'kcal left' : 'kcal over'} · ${fmtInt(totals.kcal)} of ${fmtInt(targets.kcal)} eaten`
+          }
+          below={<ProgressLine value={totals.protein} target={targets.protein} label={proteinLabel(totals.protein, targets.protein)} />}
         >
           <MacroChip letter="P" value={totals.protein} target={targets.protein} />
           <MacroChip letter="C" value={totals.carbs} target={targets.carbs} />
@@ -64,9 +79,11 @@ export default function Today() {
           value={tab}
           onChange={setTab}
         />
-        {tab === 'workout' ? <WorkoutCard /> : null}
-        {tab === 'food' ? <FoodCard /> : null}
-        {tab === 'tasks' ? <TasksCard /> : null}
+        <SwipeSegments ids={['workout', 'food', 'tasks'] as Tab[]} value={tab} onChange={setTab}>
+          {tab === 'workout' ? <WorkoutCard /> : null}
+          {tab === 'food' ? <FoodCard /> : null}
+          {tab === 'tasks' ? <TasksCard /> : null}
+        </SwipeSegments>
     </Screen>
   );
 }
@@ -165,6 +182,7 @@ function FoodCard() {
 function TasksCard() {
   const habits = useData(() => habitsForDay());
   const tick = useTickHabit();
+  const [nudge, setNudge] = useState(habitNudgeOn);
   return (
     <Card rows>
       <Rows>
@@ -177,6 +195,19 @@ function TasksCard() {
             onToggle={() => tick(h, habits)}
           />
         ))}
+        <Row
+          title="Reminder at 21:30"
+          subtitle={nudge ? 'Only when something is still open' : 'Off'}
+          right={
+            <SmallButton
+              label={nudge ? 'Turn off' : 'Turn on'}
+              onPress={() => {
+                setNudge(!nudge);
+                setHabitNudge(!nudge).catch(() => {});
+              }}
+            />
+          }
+        />
       </Rows>
     </Card>
   );

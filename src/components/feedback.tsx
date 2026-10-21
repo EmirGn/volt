@@ -270,7 +270,22 @@ export function ConfirmSheet({
 }
 
 /** "Workout saved"-style success: a big volt tick, a title, a line, one button. */
-export function DoneSheet({ title, body, actionLabel, close }: { title: string; body?: string; actionLabel: string; close: () => void }) {
+/** A new record gets its own volt line in the success sheet, with the old best struck through. */
+export type RecordLine = { name: string; value: string; was: string };
+
+export function DoneSheet({
+  title,
+  body,
+  record,
+  actionLabel,
+  close,
+}: {
+  title: string;
+  body?: string;
+  record?: RecordLine;
+  actionLabel: string;
+  close: () => void;
+}) {
   const pop = useRef(new Animated.Value(0.6)).current;
   useEffect(() => {
     Animated.spring(pop, { toValue: 1, useNativeDriver: true, speed: 18, bounciness: 12 }).start();
@@ -281,6 +296,20 @@ export function DoneSheet({ title, body, actionLabel, close }: { title: string; 
         <SheetIcon name="check" volt />
       </Animated.View>
       <SheetTitle title={title} body={body} center />
+      {record ? (
+        <View
+          accessibilityLabel={`New best: ${record.name}, ${record.value}. Previous best ${record.was}`}
+          style={{ backgroundColor: color.volt, borderRadius: radius.inset, paddingVertical: 14, paddingHorizontal: 18, gap: 4 }}
+        >
+          <Text style={[type.label, { color: color.ink }]}>New best</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+            <Text style={[type.lead, { color: color.ink }]}>
+              {record.name} {record.value}
+            </Text>
+            <Text style={[type.caption, { color: color.ink, textDecorationLine: 'line-through' }]}>{record.was}</Text>
+          </View>
+        </View>
+      ) : null}
       <SheetButton label={actionLabel} onPress={close} />
     </View>
   );
