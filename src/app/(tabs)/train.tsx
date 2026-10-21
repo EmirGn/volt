@@ -1,8 +1,8 @@
-import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Icon } from '../../components/Icon';
-import { Badge, Button, Card, EmptyNote, Header, HeroNumber, Row, Rows, Screen, Segmented } from '../../components/ui';
+import { WorkoutRow } from '../../components/history';
+import { Badge, Button, Card, EmptyNote, Header, HeroNumber, Row, Rows, Screen, Segmented, SwipeSegments, useRememberedSegment } from '../../components/ui';
 import { useData } from '../../db/useData';
 import {
   activeWorkout,
@@ -18,7 +18,7 @@ import {
   weekWorkouts,
   WEEKDAY_SHORT,
 } from '../../db/queries';
-import { fmtKg, fmtTonnes, shortDay } from '../../lib/format';
+import { fmtKg } from '../../lib/format';
 import { color, font, type } from '../../theme';
 
 type Tab = 'routines' | 'history' | 'exercises';
@@ -30,7 +30,7 @@ function begin(routineId: number) {
 }
 
 export default function Train() {
-  const [tab, setTab] = useState<Tab>('routines');
+  const [tab, setTab] = useRememberedSegment<Tab>('train', () => 'routines');
   const routines = useData(getRoutines);
   const week = useData(weekWorkouts);
   const planned = routines.filter((r) => r.weekday != null).length;
@@ -88,9 +88,11 @@ export default function Train() {
         value={tab}
         onChange={setTab}
       />
-      {tab === 'routines' ? <RoutinesCard /> : null}
-      {tab === 'history' ? <HistoryCard /> : null}
-      {tab === 'exercises' ? <ExercisesCard /> : null}
+      <SwipeSegments ids={['routines', 'history', 'exercises'] as Tab[]} value={tab} onChange={setTab}>
+        {tab === 'routines' ? <RoutinesCard /> : null}
+        {tab === 'history' ? <HistoryCard /> : null}
+        {tab === 'exercises' ? <ExercisesCard /> : null}
+      </SwipeSegments>
     </Screen>
   );
 }
@@ -124,7 +126,7 @@ function RoutinesCard() {
 }
 
 function HistoryCard() {
-  const rows = useData(() => history(20));
+  const rows = useData(() => history(8));
   const prs = useData(prWorkoutIds);
   if (!rows.length) {
     return (
@@ -136,26 +138,11 @@ function HistoryCard() {
   return (
     <Card rows>
       <Rows>
-        {rows.map((w) => {
-          const d = new Date(w.startedAt);
-          const min = Math.round((w.finishedAt - w.startedAt) / 60000);
-          return (
-            <View key={w.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 64 }}>
-              <View style={{ width: 44, alignItems: 'center' }}>
-                <Text style={type.label}>{shortDay(d)}</Text>
-                <Text style={[type.stat, { fontSize: 20 }]}>{d.getDate()}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[type.body, { fontFamily: font.sansSemi }]}>{w.name}</Text>
-                <Text style={type.caption}>
-                  {min} min · {w.sets} sets · {fmtTonnes(w.volume)} lifted
-                </Text>
-              </View>
-              {prs.has(w.id) ? <Badge label="PR" /> : null}
-            </View>
-          );
-        })}
+        {rows.map((w) => (
+          <WorkoutRow key={w.id} w={w} pr={prs.has(w.id)} />
+        ))}
       </Rows>
+      <Button label="All history and graphs" variant="paper" trailing="arrow" height={48} style={{ marginVertical: 8 }} onPress={() => router.push('/history')} />
     </Card>
   );
 }
@@ -173,7 +160,14 @@ function ExercisesCard() {
     <Card rows>
       <Rows>
         {bests.map((b) => (
-          <Row key={b.exerciseId} title={b.name} titleStyle={{ fontFamily: font.sansSemi }} value={`Best ${fmtKg(b.kg)} kg × ${b.reps}`} />
+          <Row
+            key={b.exerciseId}
+            title={b.name}
+            titleStyle={{ fontFamily: font.sansSemi }}
+            value={`Best ${fmtKg(b.kg)} kg × ${b.reps}`}
+            onPress={() => router.push({ pathname: '/exercise/[id]', params: { id: String(b.exerciseId) } })}
+            right={<Icon name="chevron" size={16} color={color.inkMuted} strokeWidth={2.2} />}
+          />
         ))}
       </Rows>
     </Card>

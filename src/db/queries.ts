@@ -213,6 +213,18 @@ export function logSet(workoutId: number, exerciseId: number, kg: number, reps: 
   return r.lastInsertRowId;
 }
 
+/** Fixes a logged set in place. The undo puts the old numbers back. */
+export function updateSet(id: number, kg: number, reps: number): Undo {
+  const rows = take('sets', 'id = ?', id);
+  db.runSync('UPDATE sets SET kg = ?, reps = ? WHERE id = ?', kg, reps, id);
+  notify();
+  return () => {
+    const old = rows[0];
+    if (old) db.runSync('UPDATE sets SET kg = ?, reps = ? WHERE id = ?', old.kg as number, old.reps as number, id);
+    notify();
+  };
+}
+
 export function deleteSet(id: number): Undo {
   const rows = take('sets', 'id = ?', id);
   db.runSync('DELETE FROM sets WHERE id = ?', id);
@@ -232,7 +244,7 @@ export type WorkoutSummary = {
   planned: number;
   completed: number;
   skipped: string[];
-  best: { name: string; kg: number; reps: number } | null;
+  best: { name: string; kg: number; reps: number; prevKg: number } | null;
 };
 
 export function workoutSummary(id: number): WorkoutSummary | null {
@@ -256,7 +268,7 @@ export function workoutSummary(id: number): WorkoutSummary | null {
     )?.kg;
     if (before != null && top.kg > before) {
       const name = db.getFirstSync<{ name: string }>('SELECT name FROM exercises WHERE id = ?', exId)?.name ?? '';
-      best = { name, kg: top.kg, reps: top.reps };
+      best = { name, kg: top.kg, reps: top.reps, prevKg: before };
       break;
     }
   }
@@ -431,7 +443,7 @@ export function mainLiftTrend(weeks = 6) {
     );
     points.push(r?.kg ?? null);
   }
-  return { name: top.name, points };
+  return { exerciseId: top.exerciseId, name: top.name, points };
 }
 
 export function workoutStats(range: 'week' | 'month' | 'year') {
@@ -723,4 +735,158 @@ export function toggleSuperset(routineId: number, id: number) {
     db.runSync('UPDATE routine_exercises SET superset = ? WHERE id IN (?, ?)', next, item.id, items[i + 1].id);
   }
   notify();
+}
+
+// ---------- history ----------
+
+type FinishedSet = { workoutId: number; workoutName: string; startedAt: number; exerciseId: number; name: string; kg: number; reps: number };
+
+/** Every set from finished workouts, oldest first. A personal log stays small enough to group in JS. */
+function finishedSets(exerciseId?: number): FinishedSet[] {
+  return db.getAllSync<FinishedSet>(
+    `SELECT s.workout_id AS workoutId, w.name AS workoutName, w.started_at AS startedAt,
+            s.exercise_id AS exerciseId, e.name, s.kg, s.reps
+     FROM sets s JOIN workouts w ON w.id = s.workout_id JOIN exercises e ON e.id = s.exercise_id
+     WHERE w.finished_at IS NOT NULL ${exerciseId != null ? 'AND s.exercise_id = ?' : ''}
+     ORDER BY w.started_at, s.done_at`,
+    ...(exerciseId != null ? [exerciseId] : []),
+  );
+}
+
+export type SetPair = { kg: number; reps: number };
+
+export type Session = {
+  workoutId: number;
+  workoutName: string;
+  startedAt: number;
+  sets: SetPair[];
+  best: SetPair;
+  e1rm: number;
+  volume: number;
+  /** Heavier than any earlier session of this exercise. */
+  pr: boolean;
+};
+
+const heavier = (a: SetPair, b: SetPair) => (b.kg > a.kg || (b.kg === a.kg && b.reps > a.reps) ? b : a);
+/** Epley: kg × (1 + reps / 30). */
+const e1rmOf = (s: SetPair) => s.kg * (1 + s.reps / 30);
+
+/** Sessions per exercise, oldest first. */
+function sessionsByExercise(rows: FinishedSet[]) {
+  const out = new Map<number, { name: string; sessions: Session[] }>();
+  for (const r of rows) {
+    let ex = out.get(r.exerciseId);
+    if (!ex) out.set(r.exerciseId, (ex = { name: r.name, sessions: [] }));
+    let s = ex.sessions[ex.sessions.length - 1];
+    if (!s || s.workoutId !== r.workoutId) {
+      s = { workoutId: r.workoutId, workoutName: r.workoutName, startedAt: r.startedAt, sets: [], best: { kg: 0, reps: 0 }, e1rm: 0, volume: 0, pr: false };
+      ex.sessions.push(s);
+    }
+    const set = { kg: r.kg, reps: r.reps };
+    s.sets.push(set);
+    s.best = s.sets.length === 1 ? set : heavier(s.best, set);
+    s.e1rm = Math.max(s.e1rm, e1rmOf(set));
+    s.volume += r.kg * r.reps;
+  }
+  for (const ex of out.values()) {
+    let top = -1;
+    ex.sessions.forEach((s, i) => {
+      s.pr = i > 0 && s.best.kg > top;
+      top = Math.max(top, s.best.kg);
+    });
+  }
+  return out;
+}
+
+export function exerciseHistory(exerciseId: number) {
+  const name = db.getFirstSync<{ name: string }>('SELECT name FROM exercises WHERE id = ?', exerciseId)?.name ?? 'Exercise';
+  return { name, sessions: sessionsByExercise(finishedSets(exerciseId)).get(exerciseId)?.sessions ?? [] };
+}
+
+export type ExerciseOverview = { exerciseId: number; name: string; sessions: number; last: SetPair; spark: number[] };
+
+/** Every exercise you've logged, most-trained first, with its last few heaviest sets for a sparkline. */
+export function exerciseOverview(): ExerciseOverview[] {
+  return [...sessionsByExercise(finishedSets()).entries()]
+    .map(([exerciseId, ex]) => ({
+      exerciseId,
+      name: ex.name,
+      sessions: ex.sessions.length,
+      last: ex.sessions[ex.sessions.length - 1].best,
+      spark: ex.sessions.slice(-8).map((s) => s.best.kg),
+    }))
+    .sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name));
+}
+
+export type WorkoutExercise = {
+  exerciseId: number;
+  name: string;
+  sets: SetPair[];
+  pr: boolean;
+  /** The same exercise's previous session, for "+2.5 kg" style comparisons. */
+  before: Session | null;
+};
+
+export function workoutDetail(id: number) {
+  const w = db.getFirstSync<{ id: number; name: string; startedAt: number; finishedAt: number | null }>(
+    'SELECT id, name, started_at AS startedAt, finished_at AS finishedAt FROM workouts WHERE id = ?',
+    id,
+  );
+  if (!w) return null;
+  const mine = workoutSets(id);
+  const ids = [...new Set(mine.map((s) => s.exerciseId))];
+  const all = ids.length ? sessionsByExercise(finishedSets().filter((r) => ids.includes(r.exerciseId))) : new Map();
+  const exercises: WorkoutExercise[] = ids.map((exId) => {
+    const ex = all.get(exId);
+    const sessions: Session[] = ex?.sessions ?? [];
+    const i = sessions.findIndex((s) => s.workoutId === id);
+    return {
+      exerciseId: exId,
+      name: ex?.name ?? db.getFirstSync<{ name: string }>('SELECT name FROM exercises WHERE id = ?', exId)?.name ?? '',
+      sets: mine.filter((s) => s.exerciseId === exId).map((s) => ({ kg: s.kg, reps: s.reps })),
+      pr: i > 0 && sessions[i].pr,
+      before: i > 0 ? sessions[i - 1] : i === -1 ? sessions[sessions.length - 1] ?? null : null,
+    };
+  });
+  const previous = db.getFirstSync<{ volume: number }>(
+    `SELECT COALESCE(SUM(s.kg * s.reps), 0) AS volume FROM workouts x JOIN sets s ON s.workout_id = x.id
+     WHERE x.id = (SELECT id FROM workouts WHERE name = ? AND finished_at IS NOT NULL AND started_at < ? ORDER BY started_at DESC LIMIT 1)`,
+    w.name,
+    w.startedAt,
+  );
+  return {
+    ...w,
+    exercises,
+    sets: mine.length,
+    volume: mine.reduce((v, s) => v + s.kg * s.reps, 0),
+    previousVolume: previous && previous.volume > 0 ? previous.volume : null,
+  };
+}
+
+/** Totals for the top of the history screen. */
+export function historyTotals() {
+  const r = db.getFirstSync<{ n: number; first: number | null; volume: number }>(
+    `SELECT COUNT(DISTINCT w.id) AS n, MIN(w.started_at) AS first, COALESCE(SUM(s.kg * s.reps), 0) AS volume
+     FROM workouts w LEFT JOIN sets s ON s.workout_id = w.id WHERE w.finished_at IS NOT NULL`,
+  );
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  let prs = 0;
+  for (const ex of sessionsByExercise(finishedSets()).values()) prs += ex.sessions.filter((s) => s.pr && s.startedAt >= monthStart).length;
+  const weeks = r?.first ? Math.max(1, (Date.now() - r.first) / (7 * 86400000)) : 1;
+  return { count: r?.n ?? 0, first: r?.first ?? null, volume: r?.volume ?? 0, prsThisMonth: prs, perWeek: (r?.n ?? 0) / weeks };
+}
+
+// ---------- evening hint ----------
+
+/** After 18:00 and under 80% of the target, names one quick-add food that closes the gap. */
+export function eveningHint(eaten: number, target: number, now = new Date()): string | null {
+  const left = target - eaten;
+  if (now.getHours() < 18 || left <= 0 || eaten >= target * 0.8) return null;
+  const list = presets().filter((p) => p.kcal > 0);
+  if (!list.length) return null;
+  const covers = list.filter((p) => p.kcal >= left).sort((a, b) => a.kcal - b.kcal)[0];
+  if (covers) return `${covers.name.toLowerCase()} covers it`;
+  const biggest = list.sort((a, b) => b.kcal - a.kcal)[0];
+  return `${biggest.name.toLowerCase()} gets you to ${Math.round(left - biggest.kcal).toLocaleString('en-US')} left`;
 }

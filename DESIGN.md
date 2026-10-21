@@ -72,7 +72,7 @@ Every main screen has the same anatomy, from top to bottom, on a 390pt-wide phon
 
 Spacing: `gutter` (16) on both sides, `screen-top` (28) at the top, `stack` (18) between the blocks, `card-pad` (20) inside cards, and `dock-clear` (110) at the bottom of scrolling content.
 
-Full-screen flows such as an active workout drop the dock and put one large `cta-h` (60) ink button at the bottom ("Complete set 3"), with a back button and a Finish pill in the header.
+Full-screen flows such as an active workout drop the dock and put one large `cta-h` (60) ink button at the bottom, with a back button and a Finish pill in the header. In the workout that button only moves you on ("Next: Dumbbell bench press", then "Finish workout"); the volt "Log set 3" button sits under the Weight and Reps steppers and never runs out, so extra sets are fine. Logging never jumps to another exercise by itself (supersets hop to their partner). ‹ › beside the exercise name, the 44pt-tall bars and the exercise list sheet move between exercises.
 
 ## Shape
 
@@ -86,11 +86,14 @@ Full-screen flows such as an active workout drop the dock and put one large `cta
 - Sizes: 22 in the dock, 20 in header buttons, 18 inside buttons, 15 inside a tick circle.
 - Decorative icons are `aria-hidden`; icon-only buttons must have an `aria-label`.
 - The set lives in the `Icon` component: `home`, `dumbbell`, `bowl`, `chat`, `chart`, `user`, `plus`, `minus`, `arrow`, `check`, `back`, `chevron`, `search`, `scan`, `edit`, `bulb`, `send`.
-- There is no logo yet. Write the name in Bricolage Grotesque 800 until there is one.
+- The mark is the open loop in `assets/volt-mark.svg`, paper on an ink square for the app icon (`assets/volt-icon.svg`). `VoltMark` draws it in the same frame as `splash-icon.png`, so the opening takes over from the native splash without a jump.
 
 ## Motion and haptics
 
-Motion isn't part of these tokens, but keep it consistent: 150–200ms ease-out for segment and tab changes, a quick scale-in when a tick turns volt, and a light haptic on "Complete set" and on ticking a task.
+Motion isn't part of these tokens, but keep it consistent: 150–200ms ease-out for segment and tab changes, a quick scale-in when a tick turns volt, and no haptics on taps (only the rest timer ending).
+
+- Content under a segmented switch sits in `SwipeSegments`: swipe sideways to change segment, and the card fades and rises 6pt (`FadeIn`, 160ms). Each tab remembers its segment while the app runs. Today opens on Workout until you've trained or it's past 18:00, then on Food.
+- Chart lines draw in left to right over 500ms, then the latest point pops volt (`Chart.tsx`). Sparklines in lists stay still.
 
 ## Components
 
@@ -123,6 +126,6 @@ The app never uses the platform's alerts or toasts. Everything lives in `src/com
 - **Toasts** are ink pills above the dock (or above a screen's bottom button): a 40px badge (volt tick = done, dark grey timer = info, paper "!" = error), a title, a muted detail and at most one volt text action such as Undo.
 - **Offline** is a quiet white banner under the header on Today and Coach, never a blocking screen.
 - **Errors** show the "Hm." screen (`ErrorScreen`, wired as expo-router's `ErrorBoundary`): what was saved, an expandable error log with Copy and Share, then Try again and Go to Today.
-- **Notifications** are asked for once on our own screen first, and only cover rest timers and a reminder 15 minutes before a planned workout.
+- **Notifications** are asked for once on our own screen first, and only cover three things: the rest countdown (fired 3 s early with `rest_countdown.wav`, bip · bip · bip · BEEP, so the long beep lands when rest ends; the workout screen plays the same file itself while open), a reminder 15 minutes before a planned workout, and one 21:30 reminder naming tasks that are still open (off switch on Today › Tasks).
 
-The opening (`Opening.tsx`) runs on every cold launch: the ink curtain with the "V." mark (identical to the native splash) lifts, the last six days fill in, today pops volt and the streak counts up. Tap to skip. A day counts when anything was logged.
+The opening (`Opening.tsx`) runs on every cold launch: the ink curtain with the open-loop mark (identical to the native splash) lifts, the last six days fill in, today pops volt and the streak counts up. Tap to skip. A day counts when anything was logged.

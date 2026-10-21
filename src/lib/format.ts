@@ -22,3 +22,8 @@ export const fmtClock = (ms: number) => {
 export const fmtTonnes = (kg: number) => (kg >= 1000 ? `${(kg / 1000).toFixed(1).replace(/\.0$/, '')} t` : `${fmtInt(kg)} kg`);
 
 export const shortDay = (d: Date) => DAYS[d.getDay()].toUpperCase();
+
+export const proteinLabel = (eaten: number, target: number) =>
+  eaten >= target
+    ? `${fmtInt(eaten)} g protein · target hit`
+    : `${fmtInt(eaten)} / ${fmtInt(target)} g protein · ${fmtInt(target - eaten)} to go`;

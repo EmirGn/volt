@@ -3,10 +3,25 @@ import { Pressable, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { useFoodToasts, useTickHabit } from '../../components/actions';
 import { Icon } from '../../components/Icon';
-import { Card, CheckRow, EmptyNote, Header, HeroNumber, Row, Rows, Screen, Segmented, SmallButton } from '../../components/ui';
+import {
+  Card,
+  CheckRow,
+  EmptyNote,
+  Header,
+  HeroNumber,
+  ProgressLine,
+  Row,
+  Rows,
+  Screen,
+  Segmented,
+  SmallButton,
+  SwipeSegments,
+  useRememberedSegment,
+} from '../../components/ui';
 import { useData } from '../../db/useData';
 import {
   addPreset,
+  eveningHint,
   foodForDay,
   getTargets,
   habitsForDay,
@@ -15,25 +30,27 @@ import {
   presets,
   totalsFor,
 } from '../../db/queries';
-import { fmtInt } from '../../lib/format';
+import { fmtInt, proteinLabel } from '../../lib/format';
 import { color, font, radius, type } from '../../theme';
 
 type Tab = 'meals' | 'supps' | 'recent';
 
 export default function Food() {
-  const [tab, setTab] = useState<Tab>('meals');
+  const [tab, setTab] = useRememberedSegment<Tab>('food', () => 'meals');
   const [search, setSearch] = useState('');
   const targets = useData(getTargets);
   const food = useData(() => foodForDay());
   const totals = totalsFor(food);
   const left = targets.kcal - totals.kcal;
+  const hint = eveningHint(totals.kcal, targets.kcal);
 
   return (
     <Screen>
       <Header label="Food · Today" icon="plus" accessibilityLabel="Add food" onPress={() => router.push('/add-food')} />
       <HeroNumber
         value={fmtInt(totals.kcal)}
-        caption={`kcal eaten · ${fmtInt(Math.abs(left))} ${left >= 0 ? 'left' : 'over'} of ${fmtInt(targets.kcal)}`}
+        caption={`kcal eaten · ${fmtInt(Math.abs(left))} ${left >= 0 ? 'left' : 'over'}${hint ? `, ${hint}` : ` of ${fmtInt(targets.kcal)}`}`}
+        below={<ProgressLine value={totals.protein} target={targets.protein} label={proteinLabel(totals.protein, targets.protein)} />}
       >
         <View
           style={{
@@ -71,9 +88,11 @@ export default function Food() {
         value={tab}
         onChange={setTab}
       />
-      {tab === 'meals' ? <MealsCard /> : null}
-      {tab === 'supps' ? <SuppsCard /> : null}
-      {tab === 'recent' ? <RecentCard search={search} /> : null}
+      <SwipeSegments ids={['meals', 'supps', 'recent'] as Tab[]} value={tab} onChange={setTab}>
+        {tab === 'meals' ? <MealsCard /> : null}
+        {tab === 'supps' ? <SuppsCard /> : null}
+        {tab === 'recent' ? <RecentCard search={search} /> : null}
+      </SwipeSegments>
     </Screen>
   );
 }
