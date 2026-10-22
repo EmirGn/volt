@@ -1,10 +1,14 @@
 import * as SQLite from 'expo-sqlite';
+import { syncMigrationSql, TABLES } from '../sync/tables';
+import { noteId } from './ids';
+import { applyPlan } from './plan';
 import { seed } from './seed';
 
 // Everything lives on the phone. One database, opened once, migrated by user_version.
 export const db = SQLite.openDatabaseSync('volt.db');
 
-const MIGRATIONS: string[] = [
+// Each step is SQL, or a function for data changes that need logic.
+const MIGRATIONS: (string | ((db: SQLite.SQLiteDatabase) => void))[] = [
   `
   PRAGMA foreign_keys = ON;
   CREATE TABLE exercises (
@@ -92,6 +96,10 @@ const MIGRATIONS: string[] = [
     value TEXT NOT NULL
   );
   `,
+  // 2: hub sync. Versions every row in _changes (see HUB.md, "Phone sync"); the backfill also covers the seed.
+  syncMigrationSql(),
+  // 3: gym plan v2 (push / pull ×2) replaces the v1 routines. Runs after 2, so the hub gets the change.
+  applyPlan,
 ];
 
 export function migrate() {
@@ -99,14 +107,19 @@ export function migrate() {
   const row = db.getFirstSync<{ user_version: number }>('PRAGMA user_version');
   let version = row?.user_version ?? 0;
   while (version < MIGRATIONS.length) {
-    const sql = MIGRATIONS[version];
+    const step = MIGRATIONS[version];
     const isFirst = version === 0;
     db.withTransactionSync(() => {
-      db.execSync(sql);
+      if (typeof step === 'string') db.execSync(step);
+      else step(db);
       if (isFirst) seed(db);
       db.execSync(`PRAGMA user_version = ${version + 1}`);
     });
     version++;
+  }
+  // New ids must stay above everything already stored, hub-made rows included.
+  for (const t of TABLES) {
+    if (t.pk.length === 1 && t.pk[0] === 'id') noteId(db.getFirstSync<{ m: number | null }>(`SELECT MAX(id) AS m FROM ${t.name}`)?.m);
   }
 }
 

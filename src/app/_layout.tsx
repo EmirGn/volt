@@ -13,6 +13,7 @@ import { FeedbackProvider } from '../components/feedback';
 import { Opening } from '../components/Opening';
 import { migrate } from '../db/db';
 import { resyncHabitNudge, resyncReminders, shouldAskForNotifications } from '../lib/notifications';
+import { startSync } from '../sync/sync';
 import { color } from '../theme';
 
 SplashScreen.preventAutoHideAsync();
@@ -35,6 +36,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     migrate();
+    startSync();
     setDbReady(true);
   }, []);
 
@@ -68,6 +70,7 @@ export default function RootLayout() {
           <Stack.Screen name="pick-exercise" options={{ presentation: 'modal' }} />
           <Stack.Screen name="weight" options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5], sheetGrabberVisible: true }} />
           <Stack.Screen name="notifications" options={{ presentation: 'fullScreenModal' }} />
+          <Stack.Screen name="hub" options={{ presentation: 'fullScreenModal' }} />
         </Stack>
         {opening ? <Opening onDone={opened} /> : null}
       </FeedbackProvider>

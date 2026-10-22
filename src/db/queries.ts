@@ -1,5 +1,6 @@
 import type { SQLiteBindValue } from 'expo-sqlite';
 import { db, notify } from './db';
+import { newId } from './ids';
 
 // ---------- dates ----------
 
@@ -166,14 +167,16 @@ export function startWorkout(routineId: number): number {
   const active = activeWorkout();
   if (active) return active.id;
   const routine = getRoutine(routineId);
-  const r = db.runSync(
-    'INSERT INTO workouts (routine_id, name, started_at) VALUES (?, ?, ?)',
+  const id = newId();
+  db.runSync(
+    'INSERT INTO workouts (id, routine_id, name, started_at) VALUES (?, ?, ?, ?)',
+    id,
     routineId,
     routine?.name ?? 'Workout',
     Date.now(),
   );
   notify();
-  return r.lastInsertRowId;
+  return id;
 }
 
 export function finishWorkout(id: number) {
@@ -200,8 +203,10 @@ export function logSet(workoutId: number, exerciseId: number, kg: number, reps: 
       workoutId,
       exerciseId,
     )?.n ?? 0;
-  const r = db.runSync(
-    'INSERT INTO sets (workout_id, exercise_id, set_index, kg, reps, done_at) VALUES (?, ?, ?, ?, ?, ?)',
+  const id = newId();
+  db.runSync(
+    'INSERT INTO sets (id, workout_id, exercise_id, set_index, kg, reps, done_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    id,
     workoutId,
     exerciseId,
     n + 1,
@@ -210,7 +215,7 @@ export function logSet(workoutId: number, exerciseId: number, kg: number, reps: 
     Date.now(),
   );
   notify();
-  return r.lastInsertRowId;
+  return id;
 }
 
 /** Fixes a logged set in place. The undo puts the old numbers back. */
@@ -498,8 +503,10 @@ export function totalsFor(entries: FoodEntry[]) {
 }
 
 export function addFood(f: Omit<FoodEntry, 'id'>, day = dayKey()): number {
-  const r = db.runSync(
-    'INSERT INTO food_entries (day, meal, name, kcal, protein, carbs, fat, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  const id = newId();
+  db.runSync(
+    'INSERT INTO food_entries (id, day, meal, name, kcal, protein, carbs, fat, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id,
     day,
     f.meal,
     f.name,
@@ -510,7 +517,7 @@ export function addFood(f: Omit<FoodEntry, 'id'>, day = dayKey()): number {
     Date.now(),
   );
   notify();
-  return r.lastInsertRowId;
+  return id;
 }
 
 export function deleteFood(id: number): Undo {
@@ -539,7 +546,8 @@ export function addPreset(p: Preset, meal: Meal): number {
 
 export function savePreset(p: Omit<Preset, 'id'>) {
   db.runSync(
-    'INSERT INTO food_presets (name, detail, kcal, protein, carbs, fat, last_used) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO food_presets (id, name, detail, kcal, protein, carbs, fat, last_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    newId(),
     p.name,
     p.detail,
     p.kcal,
@@ -618,9 +626,10 @@ export function weightSummary() {
 
 export function createRoutine(name = 'New routine'): number {
   const pos = db.getFirstSync<{ n: number }>('SELECT COALESCE(MAX(position), -1) + 1 AS n FROM routines')?.n ?? 0;
-  const r = db.runSync('INSERT INTO routines (name, focus, weekday, position) VALUES (?, ?, NULL, ?)', name, '', pos);
+  const id = newId();
+  db.runSync('INSERT INTO routines (id, name, focus, weekday, position) VALUES (?, ?, ?, NULL, ?)', id, name, '', pos);
   notify();
-  return r.lastInsertRowId;
+  return id;
 }
 
 export function renameRoutine(id: number, name: string) {
@@ -670,16 +679,18 @@ export function createExercise(name: string): number {
   const clean = name.trim();
   const existing = db.getFirstSync<{ id: number }>('SELECT id FROM exercises WHERE name = ? COLLATE NOCASE', clean);
   if (existing) return existing.id;
-  const r = db.runSync('INSERT INTO exercises (name) VALUES (?)', clean);
+  const id = newId();
+  db.runSync('INSERT INTO exercises (id, name) VALUES (?, ?)', id, clean);
   notify();
-  return r.lastInsertRowId;
+  return id;
 }
 
 export function addToRoutine(routineId: number, exerciseId: number) {
   const pos =
     db.getFirstSync<{ n: number }>('SELECT COALESCE(MAX(position), -1) + 1 AS n FROM routine_exercises WHERE routine_id = ?', routineId)?.n ?? 0;
   db.runSync(
-    'INSERT INTO routine_exercises (routine_id, exercise_id, position, sets, rep_min, rep_max, rest_sec) VALUES (?, ?, ?, 3, 8, 12, 90)',
+    'INSERT INTO routine_exercises (id, routine_id, exercise_id, position, sets, rep_min, rep_max, rest_sec) VALUES (?, ?, ?, ?, 3, 8, 12, 90)',
+    newId(),
     routineId,
     exerciseId,
     pos,
