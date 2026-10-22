@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import Svg, { Line, Text as SvgText } from 'react-native-svg';
@@ -7,6 +8,7 @@ import { Badge, Button, Card, Chip, EmptyNote, Header, HeroNumber, Row, Rows, Sc
 import { useData } from '../../db/useData';
 import { exerciseBests, habitsForDay, mainLiftTrend, weightSummary, workoutStats } from '../../db/queries';
 import { fmtKg, fmtTonnes } from '../../lib/format';
+import { syncNow, useSyncStatus } from '../../sync/sync';
 import { color, font, type } from '../../theme';
 
 type Range = 'week' | 'month' | 'year';
@@ -41,6 +43,7 @@ export default function Progress() {
           <RecordsCard />
         </View>
       </SwipeSegments>
+      <SyncLine />
     </Screen>
   );
 }
@@ -145,5 +148,44 @@ function RecordsCard() {
         ))}
       </Rows>
     </Card>
+  );
+}
+
+function ago(ms: number) {
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const h = Math.floor(min / 60);
+  return h < 24 ? `${h} h ago` : `${Math.floor(h / 24)} d ago`;
+}
+
+/** One quiet line about the hub sync. Tapping it syncs now. */
+function SyncLine() {
+  const s = useSyncStatus();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
+  const label = !s.enabled
+    ? 'Sync off'
+    : s.syncing && (s.error || !s.lastOk)
+      ? 'Syncing…'
+      : s.error
+        ? 'Couldn’t sync · tap to retry'
+        : s.lastOk
+          ? `Synced · ${ago(Math.max(0, now - s.lastOk))}`
+          : 'Not synced yet';
+  return (
+    <Pressable
+      onPress={s.enabled ? () => void syncNow().then(() => setNow(Date.now())) : undefined}
+      disabled={!s.enabled}
+      accessibilityRole={s.enabled ? 'button' : 'text'}
+      accessibilityLabel={s.enabled ? `${label}. Sync now` : label}
+      hitSlop={8}
+      style={({ pressed }) => ({ minHeight: 44, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}
+    >
+      <Text style={[type.caption, { textAlign: 'center' }]}>{label}</Text>
+    </Pressable>
   );
 }
